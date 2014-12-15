@@ -112,7 +112,7 @@ public class HttpPostRequestTest extends HttpServerTest {
         invokeServer(input);
     
         assertEquals(1, testServer.parms.size());
-        BufferedReader reader = new BufferedReader(new FileReader(testServer.files.get(FIELD)));
+        BufferedReader reader = new BufferedReader(new FileReader((String)testServer.files.get(FIELD)));
         List<String> lines = readLinesFromFile(reader);
         assertLinesOfText(new String[]{fileContent}, lines);
     }

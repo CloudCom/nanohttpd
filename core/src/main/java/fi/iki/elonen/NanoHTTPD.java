@@ -1,6 +1,20 @@
 package fi.iki.elonen;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.PushbackInputStream;
+import java.io.RandomAccessFile;
+import java.io.UnsupportedEncodingException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -87,6 +101,10 @@ public abstract class NanoHTTPD {
      * Pseudo-Parameter to use to store the actual query string in the parameters map for later re-processing.
      */
     private static final String QUERY_STRING_PARAMETER = "NanoHttpd.QUERY_STRING";
+    
+    public static final String PROTOCOL_HTTP = "HTTP/1.1";
+    public static final String PROTOCOL_RTSP = "RTSP/1.0";
+
     private final String hostname;
     private final int myPort;
     private ServerSocket myServerSocket;
@@ -267,7 +285,7 @@ public abstract class NanoHTTPD {
      */
     @Deprecated
     public Response serve(String uri, Method method, Map<String, String> headers, Map<String, String> parms,
-                                   Map<String, String> files) {
+                                   Map<String, Object> files) {
         return new Response(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found");
     }
 
@@ -281,7 +299,7 @@ public abstract class NanoHTTPD {
      * @return HTTP response, see class Response for details
      */
     public Response serve(IHTTPSession session) {
-        Map<String, String> files = new HashMap<String, String>();
+        Map<String, Object> files = new HashMap<String, Object>();
         Method method = session.getMethod();
         if (Method.PUT.equals(method) || Method.POST.equals(method)) {
             try {
@@ -387,7 +405,11 @@ public abstract class NanoHTTPD {
      * HTTP Request methods, with the ability to decode a <code>String</code> back to its enum value.
      */
     public enum Method {
-        GET, PUT, POST, DELETE, HEAD, OPTIONS;
+    	//Pure HTTP methods
+        GET, PUT, POST, DELETE, HEAD, OPTIONS,
+        //Extended HTTP-like methods (ie: RTSP)
+        DESCRIBE, SETUP, PLAY, PAUSE, RECORD, ANNOUNCE, TEARDOWN, GET_PARAMETER, SET_PARAMETER, REDIRECT, 
+        ;
 
         static Method lookup(String method) {
             for (Method m : Method.values()) {
@@ -534,10 +556,13 @@ public abstract class NanoHTTPD {
      * HTTP response. Return one of these from serve().
      */
     public static class Response {
-        /**
+		/**
          * HTTP status code after processing, e.g. "200 OK", HTTP_OK
          */
         private IStatus status;
+        
+        private String protocol = PROTOCOL_HTTP;
+        
         /**
          * MIME type of content, e.g. "text/html"
          */
@@ -612,7 +637,7 @@ public abstract class NanoHTTPD {
                     throw new Error("sendResponse(): Status can't be null.");
                 }
                 PrintWriter pw = new PrintWriter(outputStream);
-                pw.print("HTTP/1.1 " + status.getDescription() + " \r\n");
+				pw.print(protocol + " " + status.getDescription() + " \r\n");
 
                 if (mime != null) {
                     pw.print("Content-Type: " + mime + "\r\n");
@@ -729,6 +754,10 @@ public abstract class NanoHTTPD {
         public void setRequestMethod(Method requestMethod) {
             this.requestMethod = requestMethod;
         }
+        
+        public void setProtocol(String protocol) {
+        	this.protocol = protocol;
+        }
 
         public void setChunkedTransfer(boolean chunkedTransfer) {
             this.chunkedTransfer = chunkedTransfer;
@@ -814,6 +843,8 @@ public abstract class NanoHTTPD {
         String getQueryParameterString();
 
         Method getMethod();
+        
+        String getProtocol();
 
         InputStream getInputStream();
 
@@ -823,7 +854,7 @@ public abstract class NanoHTTPD {
          * Adds the files in the request body to the files map.
          * @arg files - map to modify
          */
-        void parseBody(Map<String, String> files) throws IOException, ResponseException;
+        void parseBody(Map<String, Object> files) throws IOException, ResponseException;
     }
 
     protected class HTTPSession implements IHTTPSession {
@@ -835,6 +866,7 @@ public abstract class NanoHTTPD {
         private int rlen;
         private String uri;
         private Method method;
+        private String protocol = PROTOCOL_HTTP;
         private Map<String, String> parms;
         private Map<String, String> headers;
         private CookieHandler cookies;
@@ -909,11 +941,12 @@ public abstract class NanoHTTPD {
 
                 method = Method.lookup(pre.get("method"));
                 if (method == null) {
-                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error.");
+                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Unrecognized method: " + pre.get("method"));
                 }
 
                 uri = pre.get("uri");
-
+                protocol = pre.get("protocol") != null ? pre.get("protocol") : protocol;
+                
                 cookies = new CookieHandler(headers);
 
                 // Ok, now do the serve()
@@ -923,6 +956,7 @@ public abstract class NanoHTTPD {
                 } else {
                     cookies.unloadQueue(r);
                     r.setRequestMethod(method);
+                    r.setProtocol(protocol);
                     r.send(outputStream);
                 }
             } catch (SocketException e) {
@@ -931,10 +965,12 @@ public abstract class NanoHTTPD {
             } catch (SocketTimeoutException ste) {
             	throw ste;
             } catch (IOException ioe) {
+            	ioe.printStackTrace();
                 Response r = new Response(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage());
                 r.send(outputStream);
                 safeClose(outputStream);
             } catch (ResponseException re) {
+            	re.printStackTrace();
                 Response r = new Response(re.getStatus(), MIME_PLAINTEXT, re.getMessage());
                 r.send(outputStream);
                 safeClose(outputStream);
@@ -944,9 +980,9 @@ public abstract class NanoHTTPD {
         }
 
         @Override
-        public void parseBody(Map<String, String> files) throws IOException, ResponseException {
+        public void parseBody(Map<String, Object> files) throws IOException, ResponseException {
             RandomAccessFile randomAccessFile = null;
-            BufferedReader in = null;
+            InputStream in = null;
             try {
 
                 randomAccessFile = getTmpBucket();
@@ -976,7 +1012,7 @@ public abstract class NanoHTTPD {
 
                 // Create a BufferedReader for easily reading it as string.
                 InputStream bin = new FileInputStream(randomAccessFile.getFD());
-                in = new BufferedReader(new InputStreamReader(bin));
+                in = bin;
 
                 // If the method is POST, there may be parameters
                 // in data section, too, read it:
@@ -1005,16 +1041,18 @@ public abstract class NanoHTTPD {
                             boundary = boundary.substring(1, boundary.length() - 1);
                         }
 
-                        decodeMultipartData(boundary, fbuf, in, parms, files);
+                        decodeMultipartData(boundary, fbuf, new BufferedReader(new InputStreamReader(in)), parms, files);
                     } else {
-                        String postLine = "";
-                        StringBuilder postLineBuffer = new StringBuilder();
-                        char pbuf[] = new char[512];
+                    	String postLine = "";
+                        ByteArrayOutputStream postLineBuffer = new ByteArrayOutputStream();
+                        byte pbuf[] = new byte[512];
                         int read = in.read(pbuf);
                         while (read >= 0 && !postLine.endsWith("\r\n")) {
-                            postLine = String.valueOf(pbuf, 0, read);
-                            postLineBuffer.append(postLine);
+                        	postLineBuffer.write(pbuf, 0, read);
                             read = in.read(pbuf);
+                        }
+                        if (read != -1) {
+                        	postLineBuffer.write(pbuf, 0, read);
                         }
                         postLine = postLineBuffer.toString().trim();
                         // Handle application/x-www-form-urlencoded
@@ -1022,7 +1060,8 @@ public abstract class NanoHTTPD {
                         	decodeParms(postLine, parms);
                         } else if (postLine.length() != 0) {
                         	// Special case for raw POST data => create a special files entry "postData" with raw content data
-                        	files.put("postData", postLine);
+                        	files.put("postData", postLineBuffer.toByteArray());
+                        	files.put("postString", postLine);
                         }
                     }
                 } else if (Method.PUT.equals(method)) {
@@ -1048,13 +1087,13 @@ public abstract class NanoHTTPD {
 
                 StringTokenizer st = new StringTokenizer(inLine);
                 if (!st.hasMoreTokens()) {
-                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Usage: GET /example/file.html");
+                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Usage: GET /example/file.html (got: " + inLine + ")");
                 }
 
                 pre.put("method", st.nextToken());
 
                 if (!st.hasMoreTokens()) {
-                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Missing URI. Usage: GET /example/file.html");
+                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Missing URI. Usage: GET /example/file.html (got: " + inLine + ")");
                 }
 
                 String uri = st.nextToken();
@@ -1069,6 +1108,11 @@ public abstract class NanoHTTPD {
                 }
 
                 // If there's another token, it's protocol version,
+                
+                if (st.hasMoreTokens()) {
+                	pre.put("protocol", st.nextToken());
+                }
+                
                 // followed by HTTP headers. Ignore version but parse headers.
                 // NOTE: this now forces header names lowercase since they are
                 // case insensitive and vary by client.
@@ -1092,7 +1136,7 @@ public abstract class NanoHTTPD {
          * Decodes the Multipart Body data and put it into Key/Value pairs.
          */
         private void decodeMultipartData(String boundary, ByteBuffer fbuf, BufferedReader in, Map<String, String> parms,
-                                         Map<String, String> files) throws ResponseException {
+                                         Map<String, Object> files) throws ResponseException {
             try {
                 int[] bpositions = getBoundaryPositions(fbuf, boundary.getBytes());
                 int boundarycount = 1;
@@ -1298,6 +1342,11 @@ public abstract class NanoHTTPD {
         @Override
         public final Method getMethod() {
             return method;
+        }
+        
+        @Override
+        public final String getProtocol() {
+        	return protocol;
         }
 
         @Override

@@ -100,7 +100,7 @@ public class HttpServerTest {
         public Method method;
         public Map<String, String> header;
         public Map<String, String> parms;
-        public Map<String, String> files;
+        public Map<String, Object> files;
         public Map<String, List<String>> decodedParamters;
         public Map<String, List<String>> decodedParamtersFromParameter;
         public String queryParameterString;
@@ -122,7 +122,7 @@ public class HttpServerTest {
             this.method = session.getMethod();
             this.header = session.getHeaders();
             this.parms = session.getParms();
-            this.files = new HashMap<String, String>();
+            this.files = new HashMap<String, Object>();
             try {
                 session.parseBody(files);
             } catch (Exception e) {

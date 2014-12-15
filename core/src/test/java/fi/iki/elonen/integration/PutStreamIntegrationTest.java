@@ -38,7 +38,7 @@ public class PutStreamIntegrationTest extends IntegrationTestBase<PutStreamInteg
         }
 
         @Override
-        public Response serve(String uri, Method method, Map<String, String> headers, Map<String, String> parms, Map<String, String> files)
+        public Response serve(String uri, Method method, Map<String, String> headers, Map<String, String> parms, Map<String, Object> files)
         {
             throw new UnsupportedOperationException();
         }

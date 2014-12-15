@@ -108,7 +108,7 @@ public class GetAndPostIntegrationTest extends IntegrationTestBase<GetAndPostInt
         }
 
         @Override
-        public Response serve(String uri, Method method, Map<String, String> header, Map<String, String> parms, Map<String, String> files) {
+        public Response serve(String uri, Method method, Map<String, String> header, Map<String, String> parms, Map<String, Object> files) {
             StringBuilder sb = new StringBuilder(String.valueOf(method) + ':' + response);
 
             if (parms.size() > 1) {

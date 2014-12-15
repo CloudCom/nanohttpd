@@ -33,7 +33,7 @@ public class HttpPutRequestTest extends HttpServerTest {
                     "BodyData 1",
                     "Line 2"
             };
-            reader = new BufferedReader(new FileReader(testServer.files.get("content")));
+            reader = new BufferedReader(new FileReader((String) testServer.files.get("content")));
             List<String> lines = readLinesFromFile(reader);
             assertLinesOfText(expectedInputToServeMethodViaFile, lines);
         } finally {
