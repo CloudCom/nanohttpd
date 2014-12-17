@@ -987,6 +987,8 @@ public abstract class NanoHTTPD {
 
                 randomAccessFile = getTmpBucket();
 
+                //System.out.println("- " + method + " parseBody (headers: " + headers + ")");
+                
                 long size;
                 if (headers.containsKey("content-length")) {
                     size = Integer.parseInt(headers.get("content-length"));
@@ -998,7 +1000,9 @@ public abstract class NanoHTTPD {
 
                 // Now read all the body and write it to f
                 byte[] buf = new byte[512];
-                while (rlen >= 0 && size > 0) {
+                while (rlen >= 0 && size > 0 && inputStream.available() > 0) {
+                	//System.out.println("- " + method + " bodySize: " + size);
+                	
                     rlen = inputStream.read(buf, 0, (int)Math.min(size, 512));
                     size -= rlen;
                     if (rlen > 0) {
