@@ -1016,7 +1016,7 @@ public abstract class NanoHTTPD {
 
                 // If the method is POST, there may be parameters
                 // in data section, too, read it:
-                if (Method.POST.equals(method)) {
+                if (!Method.PUT.equals(method) && !Method.GET.equals(method)) {
                     String contentType = "";
                     String contentTypeHeader = headers.get("content-type");
 
@@ -1060,8 +1060,8 @@ public abstract class NanoHTTPD {
                         	decodeParms(postLine, parms);
                         } else if (postLine.length() != 0) {
                         	// Special case for raw POST data => create a special files entry "postData" with raw content data
-                        	files.put("postData", postLineBuffer.toByteArray());
-                        	files.put("postString", postLine);
+                        	files.put(method.name().toLowerCase() + "Data", postLineBuffer.toByteArray());
+                        	files.put(method.name().toLowerCase() + "String", postLine);
                         }
                     }
                 } else if (Method.PUT.equals(method)) {
@@ -1116,8 +1116,9 @@ public abstract class NanoHTTPD {
                 // followed by HTTP headers. Ignore version but parse headers.
                 // NOTE: this now forces header names lowercase since they are
                 // case insensitive and vary by client.
-                if (st.hasMoreTokens()) {
+                if (!st.hasMoreTokens()) {
                     String line = in.readLine();
+                    
                     while (line != null && line.trim().length() > 0) {
                         int p = line.indexOf(':');
                         if (p >= 0)
