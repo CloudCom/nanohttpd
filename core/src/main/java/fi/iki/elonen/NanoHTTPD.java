@@ -408,7 +408,7 @@ public abstract class NanoHTTPD {
     	//Pure HTTP methods
         GET, PUT, POST, DELETE, HEAD, OPTIONS,
         //Extended HTTP-like methods (ie: RTSP)
-        DESCRIBE, SETUP, PLAY, PAUSE, RECORD, ANNOUNCE, TEARDOWN, GET_PARAMETER, SET_PARAMETER, REDIRECT, 
+        DESCRIBE, SETUP, PLAY, PAUSE, RECORD, ANNOUNCE, TEARDOWN, GET_PARAMETER, SET_PARAMETER, REDIRECT, FLUSH,
         ;
 
         static Method lookup(String method) {
