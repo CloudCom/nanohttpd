@@ -969,11 +969,13 @@ public abstract class NanoHTTPD {
                 Response r = new Response(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage());
                 r.send(outputStream);
                 safeClose(outputStream);
+                safeClose(inputStream);
             } catch (ResponseException re) {
             	re.printStackTrace();
                 Response r = new Response(re.getStatus(), MIME_PLAINTEXT, re.getMessage());
                 r.send(outputStream);
                 safeClose(outputStream);
+                safeClose(inputStream);
             } finally {
                 tempFileManager.clear();
             }
