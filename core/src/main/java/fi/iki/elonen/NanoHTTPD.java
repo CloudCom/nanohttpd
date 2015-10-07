@@ -15,6 +15,7 @@ import java.io.PrintWriter;
 import java.io.PushbackInputStream;
 import java.io.RandomAccessFile;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -26,6 +27,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
@@ -195,6 +197,10 @@ public abstract class NanoHTTPD {
                                     TempFileManager tempFileManager = tempFileManagerFactory.create();
                                     session = new HTTPSession(tempFileManager, inputStream, outputStream, finalAccept.getInetAddress());
                                     while (!finalAccept.isClosed()) {
+                                    	System.out.println();
+                                    	System.out.println("### EXECUTING: " + session + " (src: " + finalAccept.getInetAddress() + ":" + finalAccept.getPort() + ")");
+                                    	System.out.println();
+                                    	
                                         session.execute();
                                     }
                                 } catch (Exception e) {
@@ -887,6 +893,8 @@ public abstract class NanoHTTPD {
         private final TempFileManager tempFileManager;
         private final OutputStream outputStream;
         private PushbackInputStream inputStream;
+        private String remoteIp;
+        private int sessionbytes;
         private int splitbyte;
         private int rlen;
         private String uri;
@@ -907,16 +915,14 @@ public abstract class NanoHTTPD {
             this.tempFileManager = tempFileManager;
             this.inputStream = new PushbackInputStream(inputStream, BUFSIZE);
             this.outputStream = outputStream;
-            String remoteIp = inetAddress.isLoopbackAddress() || inetAddress.isAnyLocalAddress() ? "127.0.0.1" : inetAddress.getHostAddress().toString();
+            remoteIp = inetAddress.isLoopbackAddress() || inetAddress.isAnyLocalAddress() ? "127.0.0.1" : inetAddress.getHostAddress().toString();
             headers = new HashMap<String, String>();
-
-            headers.put("remote-addr", remoteIp);
-            headers.put("http-client-ip", remoteIp);
         }
 
         @Override
         public void execute() throws IOException {
             try {
+            	System.out.println("#################################################################");
             	System.out.println("- Executing " + this + " [input: " + inputStream.available() + "]");
             	
                 // Read the first 8192 bytes.
@@ -929,57 +935,89 @@ public abstract class NanoHTTPD {
                 {
                     int read = -1;
                     try {
+                    	System.out.println("- Reading input...");
+                    	
                         read = inputStream.read(buf, 0, BUFSIZE);
+                        System.out.println("- Read: " + read + " bytes");
+                        
                     } catch (Exception e) {
                     	e.printStackTrace();
                         safeClose(inputStream);
                         safeClose(outputStream);
                         throw new SocketException("NanoHttpd Shutdown");
                     }
-                    if (read == -1 && !serveUnknownProtocols) {
+                    if (read == -1 && sessionbytes > 0) { //only ends sessions that had prior content (EOS)
+                    	System.out.println(" - Ending " + this + " - Socket was closed");
+                    	System.out.println("---------------------------------------------------------");
+                    	
                         // socket was been closed
                         safeClose(inputStream);
                         safeClose(outputStream);
                         throw new SocketException("NanoHttpd Shutdown");
                     }
                     while (read > 0) {
+                    	sessionbytes += read;
                         rlen += read;
                         splitbyte = findHeaderEnd(buf, rlen);
                         if (splitbyte > 0)
                             break;
                         read = inputStream.read(buf, rlen, BUFSIZE - rlen);
+                        
                     }
+                    System.out.println("- Read total: " + rlen + " bytes");
                 }
+                
+                System.out.println("- [" + DatatypeConverter.printHexBinary(Arrays.copyOf(buf, rlen)) + "]");
 
                 if (splitbyte < rlen) {
+                	System.out.println("- Resetting header... " + splitbyte + ", " + rlen + ", " + (rlen - splitbyte));
+                	
                     inputStream.unread(buf, splitbyte, rlen - splitbyte);
                 }
 
                 parms = new HashMap<String, String>();
-                if(null == headers) {
+                //if(null == headers) {
                     headers = new HashMap<String, String>();
-                }
+                //}
 
                 // Create a BufferedReader for parsing the header.
                 BufferedReader hin = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(buf, 0, rlen)));
 
                 // Decode the header into parms and header java properties
                 Map<String, String> pre = new HashMap<String, String>();
-                decodeHeader(hin, pre, parms, headers);
+                try {
+                	decodeHeader(hin, pre, parms, headers);
+                } catch (ResponseException e) {
+                	if (serveUnknownProtocols) {
+                		resetBuffer(buf, pre);
+                	} else {
+                		throw e;
+                	}
+                }
 
+                String detectedProtocol = pre.get("protocol");
+                boolean isValidProtocol = PROTOCOL_HTTP.equals(detectedProtocol) || PROTOCOL_RTSP.equals(detectedProtocol);
+				protocol = isValidProtocol ? detectedProtocol : protocol;
+                
+                if (!isValidProtocol) {
+            		resetBuffer(buf, pre);
+                }
+                
                 method = Method.lookup(pre.get("method"));
                 if (method == null) {
                 	if (serveUnknownProtocols) {
-                		System.out.println("Serving unknown protocol: " + pre);
+                		System.out.println(" - Serving unknown protocol: " + pre + " for " + this);
                 	} else {
                 		throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Unrecognized method: " + pre.get("method") + " (headers: " + headers + ")", buf);
                 	}
                 }
 
                 uri = pre.get("uri");
-                protocol = pre.get("protocol") != null ? pre.get("protocol") : protocol;
                 
                 cookies = new CookieHandler(headers);
+                
+                headers.put("remote-addr", remoteIp);
+                headers.put("http-client-ip", remoteIp);
 
                 // Ok, now do the serve()
                 Response r = serve(this);
@@ -993,6 +1031,8 @@ public abstract class NanoHTTPD {
                 }
             } catch (SocketException e) {
             	System.err.println("- Error in " + this);
+            	System.out.println("#################################################################");
+            	
             	e.printStackTrace();
                 // throw it out to close socket object (finalAccept)
                 throw e;
@@ -1018,6 +1058,23 @@ public abstract class NanoHTTPD {
                 tempFileManager.clear();
             }
         }
+
+		private void resetBuffer(byte[] buf, Map<String, String> pre) throws IOException {
+			pre.clear();
+			headers.clear();
+			
+			try {
+				Field posField = PushbackInputStream.class.getDeclaredField("pos");
+				posField.setAccessible(true);
+				int pos = posField.getInt(inputStream);
+				
+				System.out.println(" - Resetting buffer and proceeding... " + inputStream + " " + splitbyte + ", " + rlen + " = " + pos);
+				
+				inputStream.unread(buf, 0, pos);
+			} catch (Exception e) {
+				throw new IOException("Error reseting buffer", e);
+			}
+		}
 
         @Override
         public void parseBody(Map<String, Object> files) throws IOException, ResponseException {
@@ -1104,8 +1161,10 @@ public abstract class NanoHTTPD {
                         	decodeParms(postLine, parms);
                         } else if (postLine.length() != 0) {
                         	// Special case for raw POST data => create a special files entry "postData" with raw content data
-                        	files.put(method.name().toLowerCase() + "Data", postLineBuffer.toByteArray());
-                        	files.put(method.name().toLowerCase() + "String", postLine);
+                        	if (method != null) {
+	                        	files.put(method.name().toLowerCase() + "Data", postLineBuffer.toByteArray());
+	                        	files.put(method.name().toLowerCase() + "String", postLine);
+                        	}
                         }
                     }
                 } else if (Method.PUT.equals(method)) {
@@ -1126,9 +1185,12 @@ public abstract class NanoHTTPD {
                 // Read the request line
                 String inLine = in.readLine();
                 if (inLine == null) {
+                	System.out.println("- decodeHeader: NO-INPUT");
                     return;
                 }
 
+                System.out.println("- decodeHeader: " + inLine);
+                
                 StringTokenizer st = new StringTokenizer(inLine);
                 if (!st.hasMoreTokens()) {
                     throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Usage: GET /example/file.html (got: " + inLine + ")");
@@ -1163,6 +1225,8 @@ public abstract class NanoHTTPD {
                 if (!st.hasMoreTokens()) {
                     String line = in.readLine();
                     
+                    System.out.println("- decodeHeader: " + inLine);
+                    
                     while (line != null && line.trim().length() > 0) {
                         int p = line.indexOf(':');
                         if (p >= 0)
@@ -1172,7 +1236,7 @@ public abstract class NanoHTTPD {
                 }
 
                 pre.put("uri", uri);
-            } catch (IOException ioe) {
+            } catch (Exception ioe) {
                 throw new ResponseException(Response.Status.INTERNAL_ERROR, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage(), ioe);
             }
         }
