@@ -38,6 +38,8 @@ import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TimeZone;
 
+import javax.xml.bind.DatatypeConverter;
+
 /**
  * A simple, tiny, nicely embeddable HTTP server in Java
  * <p/>
@@ -104,6 +106,8 @@ public abstract class NanoHTTPD {
     
     public static final String PROTOCOL_HTTP = "HTTP/1.1";
     public static final String PROTOCOL_RTSP = "RTSP/1.0";
+    
+    protected boolean serveUnknownProtocols;
 
     private final String hostname;
     private final int myPort;
@@ -185,10 +189,11 @@ public abstract class NanoHTTPD {
                             @Override
                             public void run() {
                                 OutputStream outputStream = null;
+                                HTTPSession session = null;
                                 try {
                                     outputStream = finalAccept.getOutputStream();
                                     TempFileManager tempFileManager = tempFileManagerFactory.create();
-                                    HTTPSession session = new HTTPSession(tempFileManager, inputStream, outputStream, finalAccept.getInetAddress());
+                                    session = new HTTPSession(tempFileManager, inputStream, outputStream, finalAccept.getInetAddress());
                                     while (!finalAccept.isClosed()) {
                                         session.execute();
                                     }
@@ -199,6 +204,10 @@ public abstract class NanoHTTPD {
                                         e.printStackTrace();
                                     }
                                 } finally {
+                                	if (session != null) {
+                                		System.out.println("- Closing " + session);
+                                	}
+                                	
                                     safeClose(outputStream);
                                     safeClose(inputStream);
                                     safeClose(finalAccept);
@@ -799,19 +808,35 @@ public abstract class NanoHTTPD {
     public static final class ResponseException extends Exception {
 
         private final Response.Status status;
+        private final byte[] buf;
 
         public ResponseException(Response.Status status, String message) {
+           this(status, message, (byte[]) null);
+        }
+        
+        public ResponseException(Response.Status status, String message, byte[] buf) {
             super(message);
             this.status = status;
+            this.buf = buf;
         }
 
         public ResponseException(Response.Status status, String message, Exception e) {
             super(message, e);
             this.status = status;
+            this.buf = null;
         }
 
         public Response.Status getStatus() {
             return status;
+        }
+        
+        public byte[] getBuffer() {
+        	return buf;
+        }
+        
+        @Override
+        public String getMessage() {
+        	return String.format("%s [%s]", super.getMessage(), buf != null ? DatatypeConverter.printHexBinary(buf) : "");
         }
     }
 
@@ -892,6 +917,8 @@ public abstract class NanoHTTPD {
         @Override
         public void execute() throws IOException {
             try {
+            	System.out.println("- Executing " + this + " [input: " + inputStream.available() + "]");
+            	
                 // Read the first 8192 bytes.
                 // The full header should fit in here.
                 // Apache's default header limit is 8KB.
@@ -904,11 +931,12 @@ public abstract class NanoHTTPD {
                     try {
                         read = inputStream.read(buf, 0, BUFSIZE);
                     } catch (Exception e) {
+                    	e.printStackTrace();
                         safeClose(inputStream);
                         safeClose(outputStream);
                         throw new SocketException("NanoHttpd Shutdown");
                     }
-                    if (read == -1) {
+                    if (read == -1 && !serveUnknownProtocols) {
                         // socket was been closed
                         safeClose(inputStream);
                         safeClose(outputStream);
@@ -941,7 +969,11 @@ public abstract class NanoHTTPD {
 
                 method = Method.lookup(pre.get("method"));
                 if (method == null) {
-                    throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Unrecognized method: " + pre.get("method"));
+                	if (serveUnknownProtocols) {
+                		System.out.println("Serving unknown protocol: " + pre);
+                	} else {
+                		throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Unrecognized method: " + pre.get("method") + " (headers: " + headers + ")", buf);
+                	}
                 }
 
                 uri = pre.get("uri");
@@ -960,17 +992,23 @@ public abstract class NanoHTTPD {
                     r.send(outputStream);
                 }
             } catch (SocketException e) {
+            	System.err.println("- Error in " + this);
+            	e.printStackTrace();
                 // throw it out to close socket object (finalAccept)
                 throw e;
             } catch (SocketTimeoutException ste) {
+            	System.err.println("- Error in " + this);
+            	ste.printStackTrace();
             	throw ste;
             } catch (IOException ioe) {
+            	System.err.println("- Error in " + this);
             	ioe.printStackTrace();
                 Response r = new Response(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage());
                 r.send(outputStream);
                 safeClose(outputStream);
                 safeClose(inputStream);
             } catch (ResponseException re) {
+            	System.err.println("- Error in " + this);
             	re.printStackTrace();
                 Response r = new Response(re.getStatus(), MIME_PLAINTEXT, re.getMessage());
                 r.send(outputStream);
