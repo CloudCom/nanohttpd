@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
 
 import javax.xml.bind.DatatypeConverter;
 
@@ -92,7 +93,7 @@ public abstract class NanoHTTPD {
      * This is required as the Keep-Alive HTTP connections would otherwise
      * block the socket reading thread forever (or as long the browser is open).
      */
-    public static final int SOCKET_READ_TIMEOUT = 5000;
+    public static final int SOCKET_READ_TIMEOUT = (int) TimeUnit.MINUTES.toMillis(60);
     /**
      * Common mime type for dynamic content: plain text
      */
@@ -185,7 +186,7 @@ public abstract class NanoHTTPD {
                     try {
                         final Socket finalAccept = myServerSocket.accept();
                         registerConnection(finalAccept);
-                        finalAccept.setSoTimeout(SOCKET_READ_TIMEOUT);
+                        finalAccept.setSoTimeout(SOCKET_READ_TIMEOUT); //FIXME: Enable the subclass to decide whether or not to allow long-lived sockets to be accepted (ie: only in certain situations)
                         final InputStream inputStream = finalAccept.getInputStream();
                         asyncRunner.exec(new Runnable() {
                             @Override
@@ -923,7 +924,7 @@ public abstract class NanoHTTPD {
         public void execute() throws IOException {
             try {
             	System.out.println("#################################################################");
-            	System.out.println("- Executing " + this + " [input: " + inputStream.available() + "]");
+            	System.out.println(this + " - Executing [input: " + inputStream.available() + "]");
             	
                 // Read the first 8192 bytes.
                 // The full header should fit in here.
@@ -935,10 +936,10 @@ public abstract class NanoHTTPD {
                 {
                     int read = -1;
                     try {
-                    	System.out.println("- Reading input...");
+                    	System.out.println(this + " - Reading input...");
                     	
                         read = inputStream.read(buf, 0, BUFSIZE);
-                        System.out.println("- Read: " + read + " bytes");
+                        System.out.println(this + " - Read: " + read + " bytes");
                         
                     } catch (Exception e) {
                     	e.printStackTrace();
@@ -947,7 +948,7 @@ public abstract class NanoHTTPD {
                         throw new SocketException("NanoHttpd Shutdown");
                     }
                     if (read == -1 && sessionbytes > 0) { //only ends sessions that had prior content (EOS)
-                    	System.out.println(" - Ending " + this + " - Socket was closed");
+                    	System.out.println(this + " - Ending " + this + " - Socket was closed");
                     	System.out.println("---------------------------------------------------------");
                     	
                         // socket was been closed
@@ -964,13 +965,13 @@ public abstract class NanoHTTPD {
                         read = inputStream.read(buf, rlen, BUFSIZE - rlen);
                         
                     }
-                    System.out.println("- Read total: " + rlen + " bytes");
+                    System.out.println(this + " - Read total: " + rlen + " bytes");
                 }
                 
                 System.out.println("- [" + DatatypeConverter.printHexBinary(Arrays.copyOf(buf, rlen)) + "]");
 
                 if (splitbyte < rlen) {
-                	System.out.println("- Resetting header... " + splitbyte + ", " + rlen + ", " + (rlen - splitbyte));
+                	System.out.println(this + " - Resetting header... " + splitbyte + ", " + rlen + ", " + (rlen - splitbyte));
                 	
                     inputStream.unread(buf, splitbyte, rlen - splitbyte);
                 }
@@ -1006,7 +1007,7 @@ public abstract class NanoHTTPD {
                 method = Method.lookup(pre.get("method"));
                 if (method == null) {
                 	if (serveUnknownProtocols) {
-                		System.out.println(" - Serving unknown protocol: " + pre + " for " + this);
+                		System.out.println(this + " - Serving unknown protocol: " + pre + " for " + this);
                 	} else {
                 		throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Unrecognized method: " + pre.get("method") + " (headers: " + headers + ")", buf);
                 	}
@@ -1030,25 +1031,25 @@ public abstract class NanoHTTPD {
                     r.send(outputStream);
                 }
             } catch (SocketException e) {
-            	System.err.println("- Error in " + this);
+            	System.err.println(this + " - Error in " + this);
             	System.out.println("#################################################################");
             	
             	e.printStackTrace();
                 // throw it out to close socket object (finalAccept)
                 throw e;
             } catch (SocketTimeoutException ste) {
-            	System.err.println("- Error in " + this);
+            	System.err.println(this + " - Error in " + this);
             	ste.printStackTrace();
             	throw ste;
             } catch (IOException ioe) {
-            	System.err.println("- Error in " + this);
+            	System.err.println(this + " - Error in " + this);
             	ioe.printStackTrace();
                 Response r = new Response(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage());
                 r.send(outputStream);
                 safeClose(outputStream);
                 safeClose(inputStream);
             } catch (ResponseException re) {
-            	System.err.println("- Error in " + this);
+            	System.err.println(this + " - Error in " + this);
             	re.printStackTrace();
                 Response r = new Response(re.getStatus(), MIME_PLAINTEXT, re.getMessage());
                 r.send(outputStream);
@@ -1068,7 +1069,7 @@ public abstract class NanoHTTPD {
 				posField.setAccessible(true);
 				int pos = posField.getInt(inputStream);
 				
-				System.out.println(" - Resetting buffer and proceeding... " + inputStream + " " + splitbyte + ", " + rlen + " = " + pos);
+				System.out.println(this + " - Resetting buffer and proceeding... " + inputStream + " " + splitbyte + ", " + rlen + " = " + pos);
 				
 				inputStream.unread(buf, 0, pos);
 			} catch (Exception e) {
@@ -1185,11 +1186,11 @@ public abstract class NanoHTTPD {
                 // Read the request line
                 String inLine = in.readLine();
                 if (inLine == null) {
-                	System.out.println("- decodeHeader: NO-INPUT");
+                	System.out.println(this + " - decodeHeader: NO-INPUT");
                     return;
                 }
 
-                System.out.println("- decodeHeader: " + inLine);
+                System.out.println(this + " - decodeHeader: " + inLine);
                 
                 StringTokenizer st = new StringTokenizer(inLine);
                 if (!st.hasMoreTokens()) {
@@ -1225,7 +1226,7 @@ public abstract class NanoHTTPD {
                 if (!st.hasMoreTokens()) {
                     String line = in.readLine();
                     
-                    System.out.println("- decodeHeader: " + inLine);
+                    System.out.println(this + " - decodeHeader: " + inLine);
                     
                     while (line != null && line.trim().length() > 0) {
                         int p = line.indexOf(':');
