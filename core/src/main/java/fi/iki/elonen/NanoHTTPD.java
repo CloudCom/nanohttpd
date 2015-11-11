@@ -947,7 +947,7 @@ public abstract class NanoHTTPD {
                         safeClose(outputStream);
                         throw new SocketException("NanoHttpd Shutdown");
                     }
-                    if (read == -1 && sessionbytes > 0) { //only ends sessions that had prior content (EOS)
+                    if (read == -1/* && sessionbytes > 0*/) { //only ends sessions that had prior content (EOS)
                     	System.out.println(this + " - Ending " + this + " - Socket was closed");
                     	System.out.println("---------------------------------------------------------");
                     	
