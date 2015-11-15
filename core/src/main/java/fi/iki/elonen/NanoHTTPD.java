@@ -196,7 +196,7 @@ public abstract class NanoHTTPD {
                                 try {
                                     outputStream = finalAccept.getOutputStream();
                                     TempFileManager tempFileManager = tempFileManagerFactory.create();
-                                    session = new HTTPSession(tempFileManager, inputStream, outputStream, finalAccept.getInetAddress());
+                                    session = new HTTPSession(tempFileManager, inputStream, outputStream, finalAccept.getInetAddress(), finalAccept.getPort());
                                     while (!finalAccept.isClosed()) {
                                     	System.out.println();
                                     	System.out.println("### EXECUTING: " + session + " (src: " + finalAccept.getInetAddress() + ":" + finalAccept.getPort() + ")");
@@ -295,7 +295,7 @@ public abstract class NanoHTTPD {
      *
      * @param uri     Percent-decoded URI without parameters, for example "/index.cgi"
      * @param method  "GET", "POST" etc.
-     * @param parms   Parsed, percent decoded parameters from URI and, in case of POST, data.
+     * @param params   Parsed, percent decoded parameters from URI and, in case of POST, data.
      * @param headers Header entries, percent decoded
      * @return HTTP response, see class Response for details
      */
@@ -327,7 +327,7 @@ public abstract class NanoHTTPD {
             }
         }
 
-        Map<String, String> parms = session.getParms();
+        Map<String, String> parms = session.getParams();
         parms.put(QUERY_STRING_PARAMETER, session.getQueryParameterString());
         return serve(session.getUri(), method, session.getHeaders(), parms, files);
     }
@@ -352,7 +352,7 @@ public abstract class NanoHTTPD {
      * supplied several times, by return lists of values.  In general these lists will contain a single
      * element.
      *
-     * @param parms original <b>NanoHttpd</b> parameters values, as passed to the <code>serve()</code> method.
+     * @param params original <b>NanoHttpd</b> parameters values, as passed to the <code>serve()</code> method.
      * @return a map of <code>String</code> (parameter name) to <code>List&lt;String&gt;</code> (a list of the values supplied).
      */
     protected Map<String, List<String>> decodeParameters(Map<String, String> parms) {
@@ -863,7 +863,7 @@ public abstract class NanoHTTPD {
     public interface IHTTPSession {
         void execute() throws IOException;
 
-        Map<String, String> getParms();
+        Map<String, String> getParams();
 
         Map<String, String> getHeaders();
 
@@ -895,13 +895,14 @@ public abstract class NanoHTTPD {
         private final OutputStream outputStream;
         private PushbackInputStream inputStream;
         private String remoteIp;
+        private int remotePort;
         private int sessionbytes;
         private int splitbyte;
         private int rlen;
         private String uri;
         private Method method;
         private String protocol = PROTOCOL_HTTP;
-        private Map<String, String> parms;
+        private Map<String, String> params;
         private Map<String, String> headers;
         private CookieHandler cookies;
         private String queryParameterString;
@@ -912,11 +913,12 @@ public abstract class NanoHTTPD {
             this.outputStream = outputStream;
         }
 
-        public HTTPSession(TempFileManager tempFileManager, InputStream inputStream, OutputStream outputStream, InetAddress inetAddress) {
+        public HTTPSession(TempFileManager tempFileManager, InputStream inputStream, OutputStream outputStream, InetAddress inetAddress, int remotePort) {
             this.tempFileManager = tempFileManager;
             this.inputStream = new PushbackInputStream(inputStream, BUFSIZE);
             this.outputStream = outputStream;
             remoteIp = inetAddress.isLoopbackAddress() || inetAddress.isAnyLocalAddress() ? "127.0.0.1" : inetAddress.getHostAddress().toString();
+            this.remotePort = remotePort;
             headers = new HashMap<String, String>();
         }
 
@@ -976,7 +978,7 @@ public abstract class NanoHTTPD {
                     inputStream.unread(buf, splitbyte, rlen - splitbyte);
                 }
 
-                parms = new HashMap<String, String>();
+                params = new HashMap<String, String>();
                 //if(null == headers) {
                     headers = new HashMap<String, String>();
                 //}
@@ -984,10 +986,10 @@ public abstract class NanoHTTPD {
                 // Create a BufferedReader for parsing the header.
                 BufferedReader hin = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(buf, 0, rlen)));
 
-                // Decode the header into parms and header java properties
+                // Decode the header into params and header java properties
                 Map<String, String> pre = new HashMap<String, String>();
                 try {
-                	decodeHeader(hin, pre, parms, headers);
+                	decodeHeader(hin, pre, params, headers);
                 } catch (ResponseException e) {
                 	if (serveUnknownProtocols) {
                 		resetBuffer(buf, pre);
@@ -1018,6 +1020,7 @@ public abstract class NanoHTTPD {
                 cookies = new CookieHandler(headers);
                 
                 headers.put("remote-addr", remoteIp);
+                headers.put("remote-port", String.valueOf(remotePort));
                 headers.put("http-client-ip", remoteIp);
 
                 // Ok, now do the serve()
@@ -1143,7 +1146,7 @@ public abstract class NanoHTTPD {
                             boundary = boundary.substring(1, boundary.length() - 1);
                         }
 
-                        decodeMultipartData(boundary, fbuf, new BufferedReader(new InputStreamReader(in)), parms, files);
+                        decodeMultipartData(boundary, fbuf, new BufferedReader(new InputStreamReader(in)), params, files);
                     } else {
                     	String postLine = "";
                         ByteArrayOutputStream postLineBuffer = new ByteArrayOutputStream();
@@ -1159,7 +1162,7 @@ public abstract class NanoHTTPD {
                         postLine = postLineBuffer.toString().trim();
                         // Handle application/x-www-form-urlencoded
                         if ("application/x-www-form-urlencoded".equalsIgnoreCase(contentType)) {
-                        	decodeParms(postLine, parms);
+                        	decodeParms(postLine, params);
                         } else if (postLine.length() != 0) {
                         	// Special case for raw POST data => create a special files entry "postData" with raw content data
                         	if (method != null) {
@@ -1431,8 +1434,8 @@ public abstract class NanoHTTPD {
         }
 
         @Override
-        public final Map<String, String> getParms() {
-            return parms;
+        public final Map<String, String> getParams() {
+            return params;
         }
 
 		public String getQueryParameterString() {
