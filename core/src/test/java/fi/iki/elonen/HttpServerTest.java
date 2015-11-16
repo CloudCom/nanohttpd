@@ -114,14 +114,14 @@ public class HttpServerTest {
         }
 
         public HTTPSession createSession(TempFileManager tempFileManager, InputStream inputStream, OutputStream outputStream, InetAddress inetAddress) {
-            return new HTTPSession(tempFileManager, inputStream, outputStream, inetAddress);
+            return new HTTPSession(tempFileManager, inputStream, outputStream, inetAddress, 0);
         }
 
         @Override public Response serve(IHTTPSession session) {
             this.uri = session.getUri();
             this.method = session.getMethod();
             this.header = session.getHeaders();
-            this.parms = session.getParms();
+            this.parms = session.getParams();
             this.files = new HashMap<String, Object>();
             try {
                 session.parseBody(files);
