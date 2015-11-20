@@ -1199,8 +1199,24 @@ public abstract class NanoHTTPD {
                 if (!st.hasMoreTokens()) {
                     throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Syntax error. Usage: GET /example/file.html (got: " + inLine + ")");
                 }
+                
+                // check if we are dealing with a request that went through the proxy protocol
+                String method = st.nextToken();
+                if (method.toLowerCase().equals("proxy")) {
+                	System.out.println(this + " - decodeHeader: detected proxy protocol.");
+                	
+                	// throw away the PROXY part
+                	headers.put("x-proxy-protocol", st.nextToken());
+                	headers.put("x-proxy-client-ip", st.nextToken());
+                	headers.put("x-proxy-proxy-ip", st.nextToken());
+                	headers.put("x-proxy-client-port", st.nextToken());
+                	headers.put("x-proxy-proxy-port", st.nextToken());
 
-                pre.put("method", st.nextToken());
+                	st = new StringTokenizer(in.readLine());
+                	method = st.nextToken();
+                }
+                
+                pre.put("method", method);
 
                 if (!st.hasMoreTokens()) {
                     throw new ResponseException(Response.Status.BAD_REQUEST, "BAD REQUEST: Missing URI. Usage: GET /example/file.html (got: " + inLine + ")");
